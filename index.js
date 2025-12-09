@@ -23,7 +23,7 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     // await client.connect();
-    const db = client.db("process.env.DB_NAME");
+    const db = client.db(process.env.DB_NAME);
     const usersCollection = db.collection("users");
     const scholarshipsCollection = db.collection("scholarships");
     const applicationCollection = db.collection("applications");
