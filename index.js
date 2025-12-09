@@ -30,18 +30,22 @@ async function run() {
     const reviewCollection = db.collection("reviews");
     // >>>>>>>>>>>>>>>>>>>>> USERS-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
     app.post("/users", async (req, res) => {
-      const newUser = req.body;
-      const email = req.body.email;
-      const query = { email: email };
-      const existingUser = await usersCollection.findOne(query);
+      const userData = req.body;
+      const email = userData.email;
+      const newUser = {
+        name: userData.displayName,
+        email: userData.email,
+        photoURL: userData.photoURL,
+        role: "Student",
+      };
+
+      const existingUser = await usersCollection.findOne({ email });
       if (existingUser) {
-        res.send({
-          message: "user already exits. do not need to insert again",
-        });
-      } else {
-        const result = await usersCollection.insertOne(newUser);
-        res.send(result);
+        return res.send({ message: "User already exists" });
       }
+
+      const result = await usersCollection.insertOne(newUser);
+      res.send(result);
     });
 
     console.log(
