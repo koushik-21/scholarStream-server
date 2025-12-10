@@ -25,7 +25,7 @@ async function run() {
     // await client.connect();
     const db = client.db(process.env.DB_NAME);
     const usersCollection = db.collection("users");
-    const scholarshipsCollection = db.collection("scholarships");
+    const scholarshipCollection = db.collection("scholarships");
     const applicationCollection = db.collection("applications");
     const reviewCollection = db.collection("reviews");
     // >>>>>>>>>>>>>>>>>>>>> USERS-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -45,6 +45,83 @@ async function run() {
       }
 
       const result = await usersCollection.insertOne(newUser);
+      res.send(result);
+    });
+    // >>>>>>>>>>>>>>>>>>>>> Scholarships-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
+    // GET all scholarships with search + filter + sort + pagination
+    app.get("/allScholarships", async (req, res) => {
+      try {
+        const page = parseInt(req.query.page) || 1;
+        const limit = 10;
+        const skip = (page - 1) * limit;
+
+        const search = req.query.search || "";
+        const category = req.query.category || "";
+        const country = req.query.country || "";
+        const sort = req.query.sort || ""; // feesAsc, feesDesc, newest[will do later]
+
+        let query = {};
+
+        // SEARCH
+        if (search) {
+          query.$or = [
+            { scholarshipName: { $regex: search, $options: "i" } },
+            { universityName: { $regex: search, $options: "i" } },
+            { degree: { $regex: search, $options: "i" } },
+          ];
+        }
+
+        // FILTER by category
+        if (category) {
+          query.scholarshipCategory = {
+            $regex: `^${category.trim()}$`,
+            $options: "i",
+          };
+        }
+
+        // FILTER by country
+        if (country) {
+          query.universityCountry = country;
+        }
+
+        // SORTING
+        let sortQuery = {};
+        if (sort === "feesAsc") sortQuery.applicationFees = 1;
+        if (sort === "feesDesc") sortQuery.applicationFees = -1;
+        // if (sort === "newest") sortQuery.postedDate = -1; // db te field add kortehobe - later work
+
+        const scholarships = await scholarshipCollection
+          .find(query)
+          .sort(sortQuery)
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        const total = await scholarshipCollection.countDocuments(query);
+        const totalPages = Math.ceil(total / limit);
+
+        res.json({
+          scholarships,
+          totalPages,
+          page,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: "Internal Server Error" });
+      }
+    });
+    // Get single scholarship
+    app.get("/allScholarships/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await scholarshipsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+    // Add scholarship
+    app.post("/allScholarships", async (req, res) => {
+      const scholarship = req.body;
+      const result = await scholarshipsCollection.insertOne(scholarship);
       res.send(result);
     });
 
