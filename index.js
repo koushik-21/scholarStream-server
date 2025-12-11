@@ -57,6 +57,16 @@ async function run() {
 
       res.send(result);
     });
+    app.get("/users", async (req, res) => {
+      const email = req.query.email;
+      const user = await usersCollection.findOne({ email });
+      res.send(user);
+    });
+    app.get("/users/:email", async (req, res) => {
+      const email = req.params.email;
+      const user = await usersCollection.findOne({ email });
+      res.send(user);
+    });
     // >>>>>>>>>>>>>>>>>>>>> Scholarships-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
     // GET all scholarships with search + filter + sort + pagination
     app.get("/allScholarships", async (req, res) => {
