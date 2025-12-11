@@ -47,6 +47,16 @@ async function run() {
       const result = await usersCollection.insertOne(newUser);
       res.send(result);
     });
+    app.put("/users", async (req, res) => {
+      const { email, name, photoURL } = req.body;
+
+      const result = await usersCollection.updateOne(
+        { email: email },
+        { $set: { name, photoURL } }
+      );
+
+      res.send(result);
+    });
     // >>>>>>>>>>>>>>>>>>>>> Scholarships-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
     // GET all scholarships with search + filter + sort + pagination
     app.get("/allScholarships", async (req, res) => {
@@ -121,7 +131,7 @@ async function run() {
     // Add scholarship
     app.post("/allScholarships", async (req, res) => {
       const scholarship = req.body;
-      const result = await scholarshipsCollection.insertOne(scholarship);
+      const result = await scholarshipCollection.insertOne(scholarship);
       res.send(result);
     });
 
