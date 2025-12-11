@@ -140,9 +140,45 @@ async function run() {
     });
     // Add scholarship
     app.post("/allScholarships", async (req, res) => {
-      const scholarship = req.body;
-      const result = await scholarshipCollection.insertOne(scholarship);
-      res.send(result);
+      try {
+        const scholarship = req.body;
+
+        // Validate required fields
+        const requiredFields = [
+          "scholarshipName",
+          "universityName",
+          "universityCountry",
+          "universityCity",
+          "subjectCategory",
+          "scholarshipCategory",
+          "degree",
+          "applicationFees",
+          "serviceCharge",
+          "applicationDeadline",
+          "postedUserEmail",
+        ];
+
+        for (const field of requiredFields) {
+          if (!scholarship[field]) {
+            return res.status(400).json({ message: `${field} is required` });
+          }
+        }
+
+        // Optional: add post date automatically
+        scholarship.scholarshipPostDate = new Date()
+          .toISOString()
+          .split("T")[0];
+
+        const result = await scholarshipCollection.insertOne(scholarship);
+
+        res.status(201).json({
+          message: "Scholarship added successfully",
+          insertedId: result.insertedId,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Internal Server Error" });
+      }
     });
 
     console.log(
