@@ -72,17 +72,14 @@ async function run() {
     app.get("/allScholarships", async (req, res) => {
       try {
         const page = parseInt(req.query.page) || 1;
-        const limit = 10;
+        const limit = 6;
         const skip = (page - 1) * limit;
 
-        const search = req.query.search || "";
-        const category = req.query.category || "";
-        const country = req.query.country || "";
-        const sort = req.query.sort || ""; // feesAsc, feesDesc, newest[will do later]
+        const { search, category, country, sort } = req.query;
 
         let query = {};
 
-        // SEARCH
+        // 🔍 SEARCH (scholarship / university / degree)
         if (search) {
           query.$or = [
             { scholarshipName: { $regex: search, $options: "i" } },
@@ -91,24 +88,25 @@ async function run() {
           ];
         }
 
-        // FILTER by category
+        // 🎯 FILTER BY CATEGORY
         if (category) {
-          query.scholarshipCategory = {
-            $regex: `^${category.trim()}$`,
-            $options: "i",
-          };
+          query.scholarshipCategory = category;
         }
 
-        // FILTER by country
+        // 🌍 FILTER BY COUNTRY
         if (country) {
           query.universityCountry = country;
         }
 
-        // SORTING
+        // ↕️ SORT
         let sortQuery = {};
-        if (sort === "feesAsc") sortQuery.applicationFees = 1;
-        if (sort === "feesDesc") sortQuery.applicationFees = -1;
-        // if (sort === "newest") sortQuery.postedDate = -1; // db te field add kortehobe - later work
+        if (sort === "feesAsc") {
+          sortQuery.applicationFees = 1;
+        } else if (sort === "feesDesc") {
+          sortQuery.applicationFees = -1;
+        }
+
+        const total = await scholarshipCollection.countDocuments(query);
 
         const scholarships = await scholarshipCollection
           .find(query)
@@ -117,17 +115,14 @@ async function run() {
           .limit(limit)
           .toArray();
 
-        const total = await scholarshipCollection.countDocuments(query);
-        const totalPages = Math.ceil(total / limit);
-
-        res.json({
+        res.send({
           scholarships,
-          totalPages,
+          totalPages: Math.ceil(total / limit),
           page,
         });
       } catch (error) {
         console.error(error);
-        res.status(500).json({ error: "Internal Server Error" });
+        res.status(500).send({ message: "Server Error" });
       }
     });
     // Get single scholarship
@@ -143,10 +138,11 @@ async function run() {
       try {
         const scholarship = req.body;
 
-        // Validate required fields
+        // 🔴 Required fields validation
         const requiredFields = [
           "scholarshipName",
           "universityName",
+          "universityWorldRank",
           "universityCountry",
           "universityCity",
           "subjectCategory",
@@ -160,24 +156,36 @@ async function run() {
 
         for (const field of requiredFields) {
           if (!scholarship[field]) {
-            return res.status(400).json({ message: `${field} is required` });
+            return res.status(400).json({
+              message: `${field} is required`,
+            });
           }
         }
 
-        // Optional: add post date automatically
+        //  Auto add post date
         scholarship.scholarshipPostDate = new Date()
           .toISOString()
           .split("T")[0];
 
+        //  Ensure numeric fields are numbers
+        scholarship.applicationFees = Number(scholarship.applicationFees);
+        scholarship.serviceCharge = Number(scholarship.serviceCharge);
+        scholarship.tuitionFees = Number(scholarship.tuitionFees || 0);
+
+        //  Insert into DB
         const result = await scholarshipCollection.insertOne(scholarship);
 
         res.status(201).json({
+          success: true,
           message: "Scholarship added successfully",
           insertedId: result.insertedId,
         });
       } catch (error) {
-        console.error(error);
-        res.status(500).json({ message: "Internal Server Error" });
+        console.error("Scholarship POST error:", error);
+        res.status(500).json({
+          success: false,
+          message: "Internal Server Error",
+        });
       }
     });
 
