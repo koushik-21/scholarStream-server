@@ -72,7 +72,7 @@ async function run() {
     app.get("/allScholarships", async (req, res) => {
       try {
         const page = parseInt(req.query.page) || 1;
-        const limit = 6;
+        const limit = 10;
         const skip = (page - 1) * limit;
 
         const { search, category, country, sort } = req.query;
@@ -120,6 +120,20 @@ async function run() {
           totalPages: Math.ceil(total / limit),
           page,
         });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Server Error" });
+      }
+    });
+    // Get admin-scholarship
+    app.get("/admin/allScholarships", async (req, res) => {
+      try {
+        const scholarships = await scholarshipCollection
+          .find({})
+          .sort({ scholarshipPostDate: -1 }) // newest first (optional)
+          .toArray();
+
+        res.send(scholarships);
       } catch (error) {
         console.error(error);
         res.status(500).send({ message: "Server Error" });
@@ -186,6 +200,59 @@ async function run() {
           success: false,
           message: "Internal Server Error",
         });
+      }
+    });
+    // UPDATE scholarship
+    app.put("/allScholarships/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { scholarshipName, universityName, degree, applicationFees } =
+          req.body;
+
+        // Convert applicationFees to number
+        const updatedData = {
+          scholarshipName,
+          universityName,
+          degree,
+          applicationFees: Number(applicationFees),
+        };
+
+        const result = await scholarshipCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updatedData }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res
+            .status(404)
+            .send({ message: "Scholarship not found or no changes made" });
+        }
+
+        res.send({
+          message: "Scholarship updated successfully",
+          modifiedCount: result.modifiedCount,
+        });
+      } catch (error) {
+        console.error("Update scholarship error:", error);
+        res.status(500).send({ message: "Update failed" });
+      }
+    });
+    // DELETE scholarship
+    app.delete("/allScholarships/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await scholarshipCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ message: "Scholarship not found" });
+        }
+
+        res.json({ message: "Scholarship deleted successfully" });
+      } catch (error) {
+        res.status(500).json({ message: "Server error" });
       }
     });
 
