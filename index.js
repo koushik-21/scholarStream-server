@@ -67,6 +67,67 @@ async function run() {
       const user = await usersCollection.findOne({ email });
       res.send(user);
     });
+    // GET all users (Admin - Manage Users)
+    app.get("/admin/users", async (req, res) => {
+      try {
+        const role = req.query.role;
+        let query = {};
+
+        if (role) {
+          query.role = role; // Student / Moderator / Admin
+        }
+
+        const users = await usersCollection.find(query).toArray();
+        res.send(users);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to load users" });
+      }
+    });
+    // UPDATE user role (Admin)
+    app.patch("/admin/users/role/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { role } = req.body; // Admin / Moderator / Student
+
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { role } }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).send({ message: "User not found" });
+        }
+
+        res.send({
+          message: "User role updated successfully",
+          modifiedCount: result.modifiedCount,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to update role" });
+      }
+    });
+    // DELETE user (Admin)
+    app.delete("/admin/users/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await usersCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ message: "User not found" });
+        }
+
+        res.send({ message: "User deleted successfully" });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to delete user" });
+      }
+    });
+
     // >>>>>>>>>>>>>>>>>>>>> Scholarships-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
     // GET all scholarships with search + filter + sort + pagination
     app.get("/allScholarships", async (req, res) => {
