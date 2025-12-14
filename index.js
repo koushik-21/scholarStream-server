@@ -127,6 +127,80 @@ async function run() {
         res.status(500).send({ message: "Failed to delete user" });
       }
     });
+    // >>>>>>>>>>>>>>> ADMIN ANALYTICS API <<<<<<<<<<<<<<
+    //  Overall stats
+    app.get("/admin/analytics/stats", async (req, res) => {
+      try {
+        const totalUsers = await usersCollection.countDocuments();
+        const totalScholarships = await scholarshipCollection.countDocuments();
+
+        // Total fees collected = sum of applicationFees from applications
+        const feesResult = await applicationCollection
+          .aggregate([
+            {
+              $group: {
+                _id: null,
+                totalFees: { $sum: "$applicationFees" },
+              },
+            },
+          ])
+          .toArray();
+
+        const totalFees = feesResult[0]?.totalFees || 0;
+
+        res.send({
+          totalUsers,
+          totalScholarships,
+          totalFees,
+        });
+      } catch (error) {
+        console.error("Analytics stats error:", error);
+        res.status(500).send({ message: "Server Error" });
+      }
+    });
+    //  Applications count by Scholarship Category (for chart)
+    app.get("/admin/analytics/applications-by-category", async (req, res) => {
+      try {
+        const result = await applicationCollection
+          .aggregate([
+            {
+              $addFields: {
+                scholarshipObjectId: {
+                  $toObjectId: "$scholarshipId",
+                },
+              },
+            },
+            {
+              $lookup: {
+                from: "scholarships",
+                localField: "scholarshipObjectId",
+                foreignField: "_id",
+                as: "scholarship",
+              },
+            },
+            { $unwind: "$scholarship" },
+            {
+              $group: {
+                _id: "$scholarship.scholarshipCategory",
+                applications: { $sum: 1 },
+              },
+            },
+            {
+              $project: {
+                _id: 0,
+                category: "$_id",
+                applications: 1,
+              },
+            },
+          ])
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        console.error("Analytics chart error:", error);
+        res.status(500).send({ message: "Server Error" });
+      }
+    });
 
     // >>>>>>>>>>>>>>>>>>>>> Scholarships-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
     // GET all scholarships with search + filter + sort + pagination
