@@ -22,13 +22,97 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    // await client.connect();
+    await client.connect();
     const db = client.db(process.env.DB_NAME);
     const usersCollection = db.collection("users");
     const scholarshipCollection = db.collection("scholarships");
     const applicationsCollection = db.collection("applications");
     const reviewCollection = db.collection("reviews");
     // >>>>>>>>>>> Reviews API <<<<<<<<<<
+    app.get("/reviews", async (req, res) => {
+      try {
+        const userEmail = req.query.userEmail;
+        if (!userEmail)
+          return res.status(400).send({ message: "Email required" });
+
+        const reviews = await reviewCollection
+          .aggregate([
+            { $match: { userEmail } },
+            {
+              $lookup: {
+                from: "scholarships",
+                localField: "scholarshipId",
+                foreignField: "_id",
+                as: "scholarshipDetails",
+              },
+            },
+            { $unwind: "$scholarshipDetails" },
+            {
+              $project: {
+                _id: 1,
+                scholarshipId: 1,
+                applicationId: 1,
+                userEmail: 1,
+                userName: 1,
+                rating: 1,
+                comment: 1,
+                createdAt: 1,
+                scholarshipName: "$scholarshipDetails.scholarshipName",
+                universityName: "$scholarshipDetails.universityName",
+              },
+            },
+            { $sort: { createdAt: -1 } },
+          ])
+          .toArray();
+
+        res.send(reviews);
+      } catch (error) {
+        console.error("Fetch reviews error:", error);
+        res
+          .status(500)
+          .send({ success: false, message: "Failed to fetch reviews" });
+      }
+    });
+    // Update a review
+    app.put("/reviews/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { rating, comment } = req.body;
+
+        const result = await reviewCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { rating: Number(rating), comment } }
+        );
+
+        if (result.modifiedCount === 0)
+          return res
+            .status(404)
+            .send({ message: "Review not found or no changes made" });
+
+        res.send({ success: true, message: "Review updated" });
+      } catch (error) {
+        console.error("Update review error:", error);
+        res.status(500).send({ success: false });
+      }
+    });
+    // Delete a review
+    app.delete("/reviews/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await reviewCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 0)
+          return res.status(404).send({ message: "Review not found" });
+
+        res.send({ success: true, message: "Review deleted" });
+      } catch (error) {
+        console.error("Delete review error:", error);
+        res.status(500).send({ success: false });
+      }
+    });
+
     app.post("/reviews", async (req, res) => {
       try {
         const {
@@ -72,6 +156,129 @@ async function run() {
 
       res.send(reviews);
     });
+    // Get all reviews for a specific scholarship
+    app.get("/reviews-by-scholarship/:scholarshipId", async (req, res) => {
+      try {
+        const { scholarshipId } = req.params;
+
+        const reviews = await reviewCollection
+          .aggregate([
+            { $match: { scholarshipId: new ObjectId(scholarshipId) } },
+            {
+              $lookup: {
+                from: "users",
+                localField: "userEmail",
+                foreignField: "email",
+                as: "userDetails",
+              },
+            },
+            { $unwind: "$userDetails" },
+            {
+              $project: {
+                _id: 1,
+                scholarshipId: 1,
+                userName: "$userDetails.name",
+                userPhoto: "$userDetails.photoURL",
+                rating: 1,
+                comment: 1,
+                createdAt: 1,
+              },
+            },
+            { $sort: { createdAt: -1 } },
+          ])
+          .toArray();
+
+        res.send(reviews);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ success: false });
+      }
+    });
+
+    // >>>> GET reviews for a specific user
+    // app.get("/reviews", async (req, res) => {
+    //   try {
+    //     const { userEmail, scholarshipId } = req.query;
+    //     let query = {};
+
+    //     if (userEmail) query.userEmail = userEmail;
+    //     if (scholarshipId) query.scholarshipId = new ObjectId(scholarshipId);
+
+    //     const reviews = await reviewCollection
+    //       .find(query)
+    //       .sort({ createdAt: -1 })
+    //       .toArray();
+
+    //     res.send(reviews);
+    //   } catch (error) {
+    //     console.error("Fetch reviews error:", error);
+    //     res
+    //       .status(500)
+    //       .send({ success: false, message: "Failed to fetch reviews" });
+    //   }
+    // });
+
+    // // >>>> UPDATE a review (edit)
+    // app.patch("/reviews/:id", async (req, res) => {
+    //   try {
+    //     const reviewId = req.params.id;
+    //     const { rating, comment } = req.body;
+
+    //     if (!rating) {
+    //       return res
+    //         .status(400)
+    //         .send({ success: false, message: "Rating required" });
+    //     }
+
+    //     const result = await reviewCollection.updateOne(
+    //       { _id: new ObjectId(reviewId) },
+    //       {
+    //         $set: {
+    //           rating: Number(rating),
+    //           comment: comment || "",
+    //           updatedAt: new Date(),
+    //         },
+    //       }
+    //     );
+
+    //     if (result.matchedCount === 0) {
+    //       return res
+    //         .status(404)
+    //         .send({ success: false, message: "Review not found" });
+    //     }
+
+    //     res.send({ success: true, message: "Review updated successfully" });
+    //   } catch (error) {
+    //     console.error("Update review error:", error);
+    //     res
+    //       .status(500)
+    //       .send({ success: false, message: "Failed to update review" });
+    //   }
+    // });
+
+    // // >>>> DELETE a review
+    // app.delete("/reviews/:id", async (req, res) => {
+    //   try {
+    //     const reviewId = req.params.id;
+
+    //     const result = await reviewCollection.deleteOne({
+    //       _id: new ObjectId(reviewId),
+    //     });
+
+    //     if (result.deletedCount === 0) {
+    //       return res
+    //         .status(404)
+    //         .send({ success: false, message: "Review not found" });
+    //     }
+
+    //     res.send({ success: true, message: "Review deleted successfully" });
+    //   } catch (error) {
+    //     console.error("Delete review error:", error);
+    //     res
+    //       .status(500)
+    //       .send({ success: false, message: "Failed to delete review" });
+    //   }
+    // });
 
     // >>>>>>>>>>> APPLICATIONS API <<<<<<<<<<
     //Get all applications by email
@@ -101,6 +308,7 @@ async function run() {
             {
               $project: {
                 _id: 1,
+                scholarshipId: 1,
                 applicantEmail: 1,
                 applicantName: 1,
                 amount: 1,
