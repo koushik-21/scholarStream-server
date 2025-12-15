@@ -22,7 +22,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
     const db = client.db(process.env.DB_NAME);
     const usersCollection = db.collection("users");
     const scholarshipCollection = db.collection("scholarships");
@@ -71,6 +71,53 @@ async function run() {
         res
           .status(500)
           .send({ success: false, message: "Failed to fetch reviews" });
+      }
+    });
+    // New route for all reviews (moderator)
+    app.get("/all-reviews", async (req, res) => {
+      try {
+        const reviews = await reviewCollection
+          .aggregate([
+            {
+              $lookup: {
+                from: "users",
+                localField: "userEmail",
+                foreignField: "email",
+                as: "userDetails",
+              },
+            },
+            { $unwind: "$userDetails" },
+            {
+              $lookup: {
+                from: "scholarships",
+                localField: "scholarshipId",
+                foreignField: "_id",
+                as: "scholarshipDetails",
+              },
+            },
+            { $unwind: "$scholarshipDetails" },
+            {
+              $project: {
+                _id: 1,
+                userName: "$userDetails.name",
+                userEmail: 1,
+                scholarshipName: "$scholarshipDetails.scholarshipName",
+                universityName: "$scholarshipDetails.universityName",
+                rating: 1,
+                comment: 1,
+                createdAt: 1,
+              },
+            },
+            { $sort: { createdAt: -1 } },
+          ])
+          .toArray();
+
+        res.send(reviews);
+      } catch (err) {
+        console.error(err);
+        res
+          .status(500)
+          .send({ success: false, message: "Failed to fetch all reviews" });
       }
     });
     // Update a review
