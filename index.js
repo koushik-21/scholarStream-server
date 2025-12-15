@@ -29,16 +29,7 @@ async function run() {
     const applicationsCollection = db.collection("applications");
     const reviewCollection = db.collection("reviews");
     // >>>>>>>>>>> APPLICATIONS API <<<<<<<<<<
-    app.post("/applications", async (req, res) => {
-      try {
-        const application = req.body;
-        const result = await applicationCollection.insertOne(application);
-        res.send(result);
-      } catch (error) {
-        res.status(500).send({ message: "Application failed" });
-      }
-    });
-    // 1️⃣ Create Checkout Session
+    // 1️ Create Checkout Session
     app.post("/scholarship-payment-session", async (req, res) => {
       const applicationInfo = req.body;
 
@@ -67,11 +58,13 @@ async function run() {
             },
           ],
           mode: "payment",
-          customer_email: applicationInfo.userEmail, // ✅ use actual email from frontend
+          customer_email: applicationInfo.userEmail, //  use actual email from frontend
           metadata: {
             scholarshipId: applicationInfo.scholarshipId,
             userId: applicationInfo.userId,
             scholarshipName: applicationInfo.scholarshipName,
+            applicantEmail: applicationInfo.userEmail,
+            applicantName: applicationInfo.userName || "Unknown",
           },
           // success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
           // cancel_url: `${process.env.SITE_DOMAIN}/payment-failed`,
@@ -85,60 +78,142 @@ async function run() {
         res.status(500).send({ error: err.message });
       }
     });
+    // 2️ Handle Payment Success
+    // app.patch("/scholarship-payment-success", async (req, res) => {
+    //   const sessionId = req.query.session_id;
 
-    // 2️⃣ Handle Payment Success
+    //   try {
+    //     const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    //     if (session.payment_status !== "paid") {
+    //       return res.status(400).send({ success: false });
+    //     }
+
+    //     const transactionId = session.payment_intent;
+    //     const scholarshipId = session.metadata.scholarshipId;
+    //     const userId = session.metadata.userId;
+
+    //     // ✅ Update existing application only
+    //     const result = await applicationsCollection.updateOne(
+    //       {
+    //         scholarshipId,
+    //         userId,
+    //       },
+    //       {
+    //         $set: {
+    //           paymentStatus: "paid",
+    //           applicationStatus: "submitted",
+    //           transactionId,
+    //           paidAt: new Date(),
+    //         },
+    //       }
+    //     );
+
+    //     res.send({
+    //       success: true,
+    //       transactionId,
+    //     });
+    //   } catch (err) {
+    //     console.error("Payment success error:", err);
+    //     res.status(500).send({ error: err.message });
+    //   }
+    // });
+    // app.patch("/scholarship-payment-success", async (req, res) => {
+    //   try {
+    //     const { session_id } = req.query;
+
+    //     if (!session_id) {
+    //       return res
+    //         .status(400)
+    //         .json({ success: false, message: "Session ID missing" });
+    //     }
+
+    //     // 1️ Stripe session verify
+    //     const session = await stripe.checkout.sessions.retrieve(session_id);
+
+    //     if (session.payment_status !== "paid") {
+    //       return res
+    //         .status(400)
+    //         .json({ success: false, message: "Payment not completed" });
+    //     }
+
+    //     // 2️ Metadata থেকে data নাও
+    //     const applicationData = {
+    //       scholarshipId: session.metadata.scholarshipId,
+    //       scholarshipName: session.metadata.scholarshipName,
+    //       applicantEmail: session.metadata.email,
+    //       applicantName: session.metadata.name,
+    //       amount: session.amount_total / 100,
+    //       transactionId: session.id,
+    //       paymentStatus: "paid",
+    //       appliedAt: new Date(),
+    //     };
+
+    //     // 3️ DB save
+    //     const result = await applicationsCollection.insertOne(applicationData);
+
+    //     res.json({
+    //       success: true,
+    //       transactionId: session.id,
+    //       amount: applicationData.amount,
+    //       applicationId: result.insertedId,
+    //     });
+    //   } catch (error) {
+    //     console.error("Payment success error:", error);
+    //     res.status(500).json({ success: false });
+    //   }
+    // });
     app.patch("/scholarship-payment-success", async (req, res) => {
-      const sessionId = req.query.session_id;
       try {
-        const session = await stripe.checkout.sessions.retrieve(sessionId);
-        const transactionId = session.payment_intent;
+        const { session_id } = req.query;
 
-        const existingPayment = await applicationsCollection.findOne({
-          transactionId,
-        });
-        if (existingPayment) {
-          return res.send({ message: "already exists", transactionId });
+        if (!session_id) {
+          return res.status(400).json({ success: false });
         }
 
-        const scholarshipId = session.metadata.scholarshipId;
+        const session = await stripe.checkout.sessions.retrieve(session_id);
 
-        if (session.payment_status === "paid") {
-          const update = {
-            $set: {
-              paymentStatus: "paid",
-              applicationStatus: "submitted",
-            },
-          };
-          await applicationsCollection.updateOne(
-            { _id: new ObjectId(scholarshipId) },
-            update
-          );
+        if (session.payment_status !== "paid") {
+          return res.status(400).json({ success: false });
+        }
 
-          const paymentRecord = {
-            amount: session.amount_total / 100,
-            currency: session.currency,
-            customerEmail: session.customer_email,
-            scholarshipId: session.metadata.scholarshipId,
-            scholarshipName: session.metadata.scholarshipName,
-            transactionId: session.payment_intent,
-            paymentStatus: session.payment_status,
-            paidAt: new Date(),
-          };
+        // 🔒 DUPLICATE CHECK
+        const existingApplication = await applicationsCollection.findOne({
+          transactionId: session.id,
+        });
 
-          const result = await applicationsCollection.insertOne(paymentRecord);
-
-          return res.send({
+        if (existingApplication) {
+          return res.json({
             success: true,
-            paymentInfo: result,
-            transactionId,
-            scholarshipId,
+            transactionId: session.id,
+            amount: existingApplication.amount,
+            alreadySaved: true,
           });
         }
 
-        res.send({ success: false });
-      } catch (err) {
-        console.error(err);
-        res.status(500).send({ error: err.message });
+        // ✅ SAVE ONLY ONCE
+        const applicationData = {
+          scholarshipId: session.metadata.scholarshipId,
+          scholarshipName: session.metadata.scholarshipName,
+          applicantEmail: session.metadata.applicantEmail,
+          applicantName: session.metadata.applicantName,
+          amount: session.amount_total / 100,
+          transactionId: session.id,
+          paymentStatus: "paid",
+          appliedAt: new Date(),
+        };
+
+        const result = await applicationsCollection.insertOne(applicationData);
+
+        res.json({
+          success: true,
+          transactionId: session.id,
+          amount: applicationData.amount,
+          applicationId: result.insertedId,
+        });
+      } catch (error) {
+        console.error("Payment success error:", error);
+        res.status(500).json({ success: false });
       }
     });
 
@@ -181,66 +256,7 @@ async function run() {
       const user = await usersCollection.findOne({ email });
       res.send(user);
     });
-    // GET all users (Admin - Manage Users)
-    app.get("/admin/users", async (req, res) => {
-      try {
-        const role = req.query.role;
-        let query = {};
 
-        if (role) {
-          query.role = role; // Student / Moderator / Admin
-        }
-
-        const users = await usersCollection.find(query).toArray();
-        res.send(users);
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Failed to load users" });
-      }
-    });
-    // UPDATE user role (Admin)
-    app.patch("/admin/users/role/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-        const { role } = req.body; // Admin / Moderator / Student
-
-        const result = await usersCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { role } }
-        );
-
-        if (result.modifiedCount === 0) {
-          return res.status(404).send({ message: "User not found" });
-        }
-
-        res.send({
-          message: "User role updated successfully",
-          modifiedCount: result.modifiedCount,
-        });
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Failed to update role" });
-      }
-    });
-    // DELETE user (Admin)
-    app.delete("/admin/users/:id", async (req, res) => {
-      try {
-        const id = req.params.id;
-
-        const result = await usersCollection.deleteOne({
-          _id: new ObjectId(id),
-        });
-
-        if (result.deletedCount === 0) {
-          return res.status(404).send({ message: "User not found" });
-        }
-
-        res.send({ message: "User deleted successfully" });
-      } catch (error) {
-        console.error(error);
-        res.status(500).send({ message: "Failed to delete user" });
-      }
-    });
     // >>>>>>>>>>>>>>> ADMIN ANALYTICS API <<<<<<<<<<<<<<
     //  Overall stats
     app.get("/admin/analytics/stats", async (req, res) => {
@@ -313,6 +329,66 @@ async function run() {
       } catch (error) {
         console.error("Analytics chart error:", error);
         res.status(500).send({ message: "Server Error" });
+      }
+    });
+    // GET all users (Admin - Manage Users)
+    app.get("/admin/users", async (req, res) => {
+      try {
+        const role = req.query.role;
+        let query = {};
+
+        if (role) {
+          query.role = role; // Student / Moderator / Admin
+        }
+
+        const users = await usersCollection.find(query).toArray();
+        res.send(users);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to load users" });
+      }
+    });
+    // UPDATE user role (Admin)
+    app.patch("/admin/users/role/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const { role } = req.body; // Admin / Moderator / Student
+
+        const result = await usersCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { role } }
+        );
+
+        if (result.modifiedCount === 0) {
+          return res.status(404).send({ message: "User not found" });
+        }
+
+        res.send({
+          message: "User role updated successfully",
+          modifiedCount: result.modifiedCount,
+        });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to update role" });
+      }
+    });
+    // DELETE user (Admin)
+    app.delete("/admin/users/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await usersCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).send({ message: "User not found" });
+        }
+
+        res.send({ message: "User deleted successfully" });
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: "Failed to delete user" });
       }
     });
 
