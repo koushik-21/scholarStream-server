@@ -28,8 +28,53 @@ async function run() {
     const scholarshipCollection = db.collection("scholarships");
     const applicationsCollection = db.collection("applications");
     const reviewCollection = db.collection("reviews");
-    // >>>>>>>>>>> APPLICATIONS API <<<<<<<<<<
+    // >>>>>>>>>>> Reviews API <<<<<<<<<<
+    app.post("/reviews", async (req, res) => {
+      try {
+        const {
+          scholarshipId,
+          applicationId,
+          userEmail,
+          userName,
+          rating,
+          comment,
+        } = req.body;
 
+        if (!scholarshipId || !userEmail || !rating) {
+          return res.status(400).send({ message: "Invalid review data" });
+        }
+
+        const review = {
+          scholarshipId: new ObjectId(scholarshipId),
+          applicationId: new ObjectId(applicationId),
+          userEmail,
+          userName,
+          rating: Number(rating),
+          comment: comment || "",
+          createdAt: new Date(),
+        };
+
+        await reviewCollection.insertOne(review);
+
+        res.send({ success: true, message: "Review submitted" });
+      } catch (error) {
+        console.error("Review error:", error);
+        res.status(500).send({ success: false });
+      }
+    });
+    app.get("/reviews/:scholarshipId", async (req, res) => {
+      const scholarshipId = req.params.scholarshipId;
+
+      const reviews = await reviewCollection
+        .find({ scholarshipId: new ObjectId(scholarshipId) })
+        .sort({ createdAt: -1 })
+        .toArray();
+
+      res.send(reviews);
+    });
+
+    // >>>>>>>>>>> APPLICATIONS API <<<<<<<<<<
+    //Get all applications by email
     app.get("/applications", async (req, res) => {
       try {
         const email = req.query.email;
@@ -85,7 +130,6 @@ async function run() {
         res.status(500).send({ message: "Failed to fetch applications" });
       }
     });
-
     // DELETE application by ID
     app.delete("/applications/:id", async (req, res) => {
       try {
@@ -178,7 +222,6 @@ async function run() {
         res.status(500).send({ error: error.message });
       }
     });
-
     // ======================================================
     //  PAYMENT SUCCESS VERIFY
     // ======================================================
@@ -233,6 +276,88 @@ async function run() {
         res.status(500).send({ success: false });
       }
     });
+    // >>>>>>>>>>>>>>>>>>>>> Moderator-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
+    // GET all applications (Moderator)
+    app.get("/moderator/applications", async (req, res) => {
+      try {
+        const result = await applicationsCollection
+          .aggregate([
+            {
+              $addFields: {
+                scholarshipObjectId: { $toObjectId: "$scholarshipId" },
+              },
+            },
+
+            // ✅ latest application first
+            {
+              $sort: { createdAt: -1 },
+            },
+
+            {
+              $lookup: {
+                from: "scholarships",
+                localField: "scholarshipObjectId",
+                foreignField: "_id",
+                as: "scholarship",
+              },
+            },
+            { $unwind: "$scholarship" },
+
+            {
+              $project: {
+                _id: 1, // 🔥 MUST
+                applicantName: 1,
+                applicantEmail: 1,
+                applicationStatus: 1,
+                paymentStatus: 1,
+                feedback: 1,
+                createdAt: 1,
+                universityName: "$scholarship.universityName",
+              },
+            },
+          ])
+          .toArray();
+
+        res.send(result);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Failed to load applications" });
+      }
+    });
+
+    // Update application status
+    app.patch("/moderator/applications/status/:id", async (req, res) => {
+      const { status } = req.body;
+
+      const allowedStatus = ["processing", "completed", "rejected"];
+
+      if (!allowedStatus.includes(status)) {
+        return res.status(400).send({ message: "Invalid status" });
+      }
+
+      const result = await applicationsCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: { applicationStatus: status } }
+      );
+
+      res.send(result);
+    });
+
+    // Add feedback
+    app.patch("/moderator/applications/feedback/:id", async (req, res) => {
+      const { feedback } = req.body;
+
+      if (!feedback?.trim()) {
+        return res.status(400).send({ message: "Feedback required" });
+      }
+
+      const result = await applicationsCollection.updateOne(
+        { _id: new ObjectId(req.params.id) },
+        { $set: { feedback } }
+      );
+
+      res.send(result);
+    });
 
     // >>>>>>>>>>>>>>>>>>>>> USERS-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
     app.post("/users", async (req, res) => {
@@ -282,17 +407,29 @@ async function run() {
         const totalScholarships = await scholarshipCollection.countDocuments();
 
         // Total fees collected = sum of applicationFees from applications
-        const feesResult = await applicationCollection
+        // const feesResult = await applicationsCollection
+        //   .aggregate([
+        //     {
+        //       $group: {
+        //         _id: null,
+        //         totalFees: { $sum: "$applicationFees" },
+        //       },
+        //     },
+        //   ])
+        //   .toArray();
+        const feesResult = await applicationsCollection
           .aggregate([
+            {
+              $match: { paymentStatus: "paid" }, // 💰 only successful payments
+            },
             {
               $group: {
                 _id: null,
-                totalFees: { $sum: "$applicationFees" },
+                totalFees: { $sum: "$amount" }, // ✅ correct field
               },
             },
           ])
           .toArray();
-
         const totalFees = feesResult[0]?.totalFees || 0;
 
         res.send({
@@ -308,7 +445,7 @@ async function run() {
     //  Applications count by Scholarship Category (for chart)
     app.get("/admin/analytics/applications-by-category", async (req, res) => {
       try {
-        const result = await applicationCollection
+        const result = await applicationsCollection
           .aggregate([
             {
               $addFields: {
