@@ -29,127 +29,428 @@ async function run() {
     const applicationsCollection = db.collection("applications");
     const reviewCollection = db.collection("reviews");
     // >>>>>>>>>>> APPLICATIONS API <<<<<<<<<<
-    // 1️ Create Checkout Session
-    app.post("/scholarship-payment-session", async (req, res) => {
-      const applicationInfo = req.body;
+    // ======================================================
+    // GET applications by student email
+    // app.get("/applications", async (req, res) => {
+    //   try {
+    //     const email = req.query.email;
+    //     if (!email)
+    //       return res.status(400).send({ message: "Email query required" });
 
-      // Validate email
-      if (
-        !applicationInfo.userEmail ||
-        !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(applicationInfo.userEmail)
-      ) {
-        return res.status(400).send({ error: "Invalid email address" });
-      }
+    //     // Find all applications for this email
+    //     const apps = await applicationsCollection
+    //       .find({ applicantEmail: email })
+    //       .toArray();
 
-      const amount = parseInt(applicationInfo.applicationFees) * 100; // USD cents
+    //     // Return the applications
+    //     res.send(apps);
+    //   } catch (err) {
+    //     console.error(err);
+    //     res.status(500).send({ message: "Failed to fetch applications" });
+    //   }
+    // });
+    // GET applications by student email with scholarship info
+    // app.get("/applications", async (req, res) => {
+    //   try {
+    //     const email = req.query.email;
+    //     if (!email)
+    //       return res.status(400).send({ message: "Email query required" });
 
+    //     const apps = await applicationsCollection
+    //       .aggregate([
+    //         { $match: { applicantEmail: email } },
+    //         {
+    //           $lookup: {
+    //             from: "scholarships",
+    //             localField: "scholarshipId",
+    //             foreignField: "_id",
+    //             as: "scholarshipDetails",
+    //           },
+    //         },
+    //         { $unwind: "$scholarshipDetails" }, // single scholarship per application
+    //         {
+    //           $project: {
+    //             _id: 1,
+    //             applicantEmail: 1,
+    //             applicantName: 1,
+    //             amount: 1,
+    //             paymentStatus: 1,
+    //             applicationStatus: 1,
+    //             transactionId: 1,
+    //             paidAt: 1,
+    //             feedback: 1,
+    //             universityName: "$scholarshipDetails.universityName",
+    //             universityAddress: {
+    //               $concat: [
+    //                 "$scholarshipDetails.universityCity",
+    //                 ", ",
+    //                 "$scholarshipDetails.universityCountry",
+    //               ],
+    //             },
+    //             subjectCategory: "$scholarshipDetails.subjectCategory",
+    //             degree: "$scholarshipDetails.degree",
+    //           },
+    //         },
+    //       ])
+    //       .toArray();
+
+    //     res.send(apps);
+    //   } catch (err) {
+    //     console.error(err);
+    //     res.status(500).send({ message: "Failed to fetch applications" });
+    //   }
+    // });
+    app.get("/applications", async (req, res) => {
       try {
+        const email = req.query.email;
+        if (!email)
+          return res.status(400).send({ message: "Email query required" });
+
+        const apps = await applicationsCollection
+          .aggregate([
+            { $match: { applicantEmail: email } },
+            {
+              $addFields: {
+                scholarshipObjectId: { $toObjectId: "$scholarshipId" },
+              },
+            },
+            {
+              $lookup: {
+                from: "scholarships",
+                localField: "scholarshipObjectId",
+                foreignField: "_id",
+                as: "scholarshipDetails",
+              },
+            },
+            { $unwind: "$scholarshipDetails" },
+            {
+              $project: {
+                _id: 1,
+                applicantEmail: 1,
+                applicantName: 1,
+                amount: 1,
+                paymentStatus: 1,
+                applicationStatus: 1,
+                transactionId: 1,
+                paidAt: 1,
+                feedback: 1,
+                universityName: "$scholarshipDetails.universityName",
+                universityAddress: {
+                  $concat: [
+                    "$scholarshipDetails.universityCity",
+                    ", ",
+                    "$scholarshipDetails.universityCountry",
+                  ],
+                },
+                subjectCategory: "$scholarshipDetails.subjectCategory",
+                degree: "$scholarshipDetails.degree",
+              },
+            },
+          ])
+          .toArray();
+
+        res.send(apps);
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Failed to fetch applications" });
+      }
+    });
+
+    // DELETE application by ID
+    app.delete("/applications/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+        const result = await applicationsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+        if (result.deletedCount === 0)
+          return res.status(404).send({ message: "Application not found" });
+        res.send({ message: "Application deleted successfully" });
+      } catch (err) {
+        console.error(err);
+        res.status(500).send({ message: "Delete failed" });
+      }
+    });
+
+    // ======================================================
+    // 2️⃣ CREATE STRIPE CHECKOUT SESSION
+    // ======================================================
+    app.post("/scholarship-payment-session", async (req, res) => {
+      try {
+        const { applicationId, userEmail } = req.body;
+
+        if (!applicationId || !userEmail) {
+          return res.status(400).send({ error: "Invalid payment data" });
+        }
+
+        // 🔒 Always fetch amount from DB (never trust frontend)
+        const application = await applicationsCollection.findOne({
+          _id: new ObjectId(applicationId),
+        });
+
+        if (!application) {
+          return res.status(404).send({ error: "Application not found" });
+        }
+
         const session = await stripe.checkout.sessions.create({
+          payment_method_types: ["card"],
+          mode: "payment",
+          customer_email: userEmail,
           line_items: [
             {
               price_data: {
                 currency: "usd",
-                unit_amount: amount,
+                unit_amount: application.amount * 100,
                 product_data: {
-                  name: `Scholarship: ${applicationInfo.scholarshipName}`,
+                  name: application.scholarshipName,
                 },
               },
               quantity: 1,
             },
           ],
-          mode: "payment",
-          customer_email: applicationInfo.userEmail, //  use actual email from frontend
           metadata: {
-            scholarshipId: applicationInfo.scholarshipId,
-            userId: applicationInfo.userId,
-            scholarshipName: applicationInfo.scholarshipName,
-            applicantEmail: applicationInfo.userEmail,
-            applicantName: applicationInfo.userName || "Unknown",
+            applicationId: applicationId,
           },
-          // success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-          // cancel_url: `${process.env.SITE_DOMAIN}/payment-failed`,
           success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${process.env.SITE_DOMAIN}/payment-failed`,
+          cancel_url: `${process.env.SITE_DOMAIN}/payment-failed?applicationId=${applicationId}`,
         });
 
         res.send({ url: session.url });
-      } catch (err) {
-        console.error("Stripe checkout error:", err);
-        res.status(500).send({ error: err.message });
+      } catch (error) {
+        console.error("Stripe session error:", error);
+        res.status(500).send({ error: error.message });
       }
     });
-    // 2️ Handle Payment Success
-    // app.patch("/scholarship-payment-success", async (req, res) => {
-    //   const sessionId = req.query.session_id;
+
+    // ======================================================
+    // 3️⃣ PAYMENT SUCCESS VERIFY
+    // ======================================================
+    app.patch("/scholarship-payment-success", async (req, res) => {
+      try {
+        const { session_id } = req.query;
+        if (!session_id) {
+          return res.status(400).send({ success: false });
+        }
+
+        const session = await stripe.checkout.sessions.retrieve(session_id);
+        const applicationId = session.metadata.applicationId;
+
+        if (session.payment_status !== "paid") {
+          return res.send({ success: false });
+        }
+
+        // 🔁 Prevent duplicate update
+        const existing = await applicationsCollection.findOne({
+          _id: new ObjectId(applicationId),
+        });
+
+        if (existing?.paymentStatus === "paid") {
+          return res.send({
+            success: true,
+            amount: existing.amount,
+            transactionId: existing.transactionId,
+            alreadyPaid: true,
+          });
+        }
+
+        await applicationsCollection.updateOne(
+          { _id: new ObjectId(applicationId) },
+          {
+            $set: {
+              paymentStatus: "paid",
+              applicationStatus: "submitted",
+              transactionId: session.payment_intent,
+              paidAt: new Date(),
+            },
+            $inc: { paymentAttempts: 1 },
+          }
+        );
+
+        res.send({
+          success: true,
+          amount: session.amount_total / 100,
+          transactionId: session.payment_intent,
+        });
+      } catch (error) {
+        console.error("Payment success error:", error);
+        res.status(500).send({ success: false });
+      }
+    });
+
+    // // 1️ Create Checkout Session
+    // app.post("/scholarship-payment-session", async (req, res) => {
+    //   const applicationInfo = req.body;
+
+    //   // Validate email
+    //   if (
+    //     !applicationInfo.userEmail ||
+    //     !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(applicationInfo.userEmail)
+    //   ) {
+    //     return res.status(400).send({ error: "Invalid email address" });
+    //   }
+
+    //   const amount = parseInt(applicationInfo.applicationFees) * 100; // USD cents
 
     //   try {
-    //     const session = await stripe.checkout.sessions.retrieve(sessionId);
-
-    //     if (session.payment_status !== "paid") {
-    //       return res.status(400).send({ success: false });
-    //     }
-
-    //     const transactionId = session.payment_intent;
-    //     const scholarshipId = session.metadata.scholarshipId;
-    //     const userId = session.metadata.userId;
-
-    //     // ✅ Update existing application only
-    //     const result = await applicationsCollection.updateOne(
-    //       {
-    //         scholarshipId,
-    //         userId,
-    //       },
-    //       {
-    //         $set: {
-    //           paymentStatus: "paid",
-    //           applicationStatus: "submitted",
-    //           transactionId,
-    //           paidAt: new Date(),
+    //     const session = await stripe.checkout.sessions.create({
+    //       line_items: [
+    //         {
+    //           price_data: {
+    //             currency: "usd",
+    //             unit_amount: amount,
+    //             product_data: {
+    //               name: `Scholarship: ${applicationInfo.scholarshipName}`,
+    //             },
+    //           },
+    //           quantity: 1,
     //         },
-    //       }
-    //     );
-
-    //     res.send({
-    //       success: true,
-    //       transactionId,
+    //       ],
+    //       mode: "payment",
+    //       customer_email: applicationInfo.userEmail, //  use actual email from frontend
+    //       metadata: {
+    //         scholarshipId: applicationInfo.scholarshipId,
+    //         userId: applicationInfo.userId,
+    //         scholarshipName: applicationInfo.scholarshipName,
+    //         applicantEmail: applicationInfo.userEmail,
+    //         applicantName: applicationInfo.userName || "Unknown",
+    //       },
+    //       // success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+    //       // cancel_url: `${process.env.SITE_DOMAIN}/payment-failed`,
+    //       success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+    //       cancel_url: `${process.env.SITE_DOMAIN}/payment-failed`,
     //     });
+
+    //     res.send({ url: session.url });
     //   } catch (err) {
-    //     console.error("Payment success error:", err);
+    //     console.error("Stripe checkout error:", err);
     //     res.status(500).send({ error: err.message });
     //   }
     // });
+    // // 2️ Handle Payment Success
+    // // app.patch("/scholarship-payment-success", async (req, res) => {
+    // //   const sessionId = req.query.session_id;
+
+    // //   try {
+    // //     const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+    // //     if (session.payment_status !== "paid") {
+    // //       return res.status(400).send({ success: false });
+    // //     }
+
+    // //     const transactionId = session.payment_intent;
+    // //     const scholarshipId = session.metadata.scholarshipId;
+    // //     const userId = session.metadata.userId;
+
+    // //     // ✅ Update existing application only
+    // //     const result = await applicationsCollection.updateOne(
+    // //       {
+    // //         scholarshipId,
+    // //         userId,
+    // //       },
+    // //       {
+    // //         $set: {
+    // //           paymentStatus: "paid",
+    // //           applicationStatus: "submitted",
+    // //           transactionId,
+    // //           paidAt: new Date(),
+    // //         },
+    // //       }
+    // //     );
+
+    // //     res.send({
+    // //       success: true,
+    // //       transactionId,
+    // //     });
+    // //   } catch (err) {
+    // //     console.error("Payment success error:", err);
+    // //     res.status(500).send({ error: err.message });
+    // //   }
+    // // });
+    // // app.patch("/scholarship-payment-success", async (req, res) => {
+    // //   try {
+    // //     const { session_id } = req.query;
+
+    // //     if (!session_id) {
+    // //       return res
+    // //         .status(400)
+    // //         .json({ success: false, message: "Session ID missing" });
+    // //     }
+
+    // //     // 1️ Stripe session verify
+    // //     const session = await stripe.checkout.sessions.retrieve(session_id);
+
+    // //     if (session.payment_status !== "paid") {
+    // //       return res
+    // //         .status(400)
+    // //         .json({ success: false, message: "Payment not completed" });
+    // //     }
+
+    // //     // 2️ Metadata থেকে data নাও
+    // //     const applicationData = {
+    // //       scholarshipId: session.metadata.scholarshipId,
+    // //       scholarshipName: session.metadata.scholarshipName,
+    // //       applicantEmail: session.metadata.email,
+    // //       applicantName: session.metadata.name,
+    // //       amount: session.amount_total / 100,
+    // //       transactionId: session.id,
+    // //       paymentStatus: "paid",
+    // //       appliedAt: new Date(),
+    // //     };
+
+    // //     // 3️ DB save
+    // //     const result = await applicationsCollection.insertOne(applicationData);
+
+    // //     res.json({
+    // //       success: true,
+    // //       transactionId: session.id,
+    // //       amount: applicationData.amount,
+    // //       applicationId: result.insertedId,
+    // //     });
+    // //   } catch (error) {
+    // //     console.error("Payment success error:", error);
+    // //     res.status(500).json({ success: false });
+    // //   }
+    // // });
     // app.patch("/scholarship-payment-success", async (req, res) => {
     //   try {
     //     const { session_id } = req.query;
 
     //     if (!session_id) {
-    //       return res
-    //         .status(400)
-    //         .json({ success: false, message: "Session ID missing" });
+    //       return res.status(400).json({ success: false });
     //     }
 
-    //     // 1️ Stripe session verify
     //     const session = await stripe.checkout.sessions.retrieve(session_id);
 
     //     if (session.payment_status !== "paid") {
-    //       return res
-    //         .status(400)
-    //         .json({ success: false, message: "Payment not completed" });
+    //       return res.status(400).json({ success: false });
     //     }
 
-    //     // 2️ Metadata থেকে data নাও
+    //     // 🔒 DUPLICATE CHECK
+    //     const existingApplication = await applicationsCollection.findOne({
+    //       transactionId: session.id,
+    //     });
+
+    //     if (existingApplication) {
+    //       return res.json({
+    //         success: true,
+    //         transactionId: session.id,
+    //         amount: existingApplication.amount,
+    //         alreadySaved: true,
+    //       });
+    //     }
+
+    //     // ✅ SAVE ONLY ONCE
     //     const applicationData = {
     //       scholarshipId: session.metadata.scholarshipId,
     //       scholarshipName: session.metadata.scholarshipName,
-    //       applicantEmail: session.metadata.email,
-    //       applicantName: session.metadata.name,
+    //       applicantEmail: session.metadata.applicantEmail,
+    //       applicantName: session.metadata.applicantName,
     //       amount: session.amount_total / 100,
     //       transactionId: session.id,
     //       paymentStatus: "paid",
     //       appliedAt: new Date(),
     //     };
 
-    //     // 3️ DB save
     //     const result = await applicationsCollection.insertOne(applicationData);
 
     //     res.json({
@@ -163,59 +464,6 @@ async function run() {
     //     res.status(500).json({ success: false });
     //   }
     // });
-    app.patch("/scholarship-payment-success", async (req, res) => {
-      try {
-        const { session_id } = req.query;
-
-        if (!session_id) {
-          return res.status(400).json({ success: false });
-        }
-
-        const session = await stripe.checkout.sessions.retrieve(session_id);
-
-        if (session.payment_status !== "paid") {
-          return res.status(400).json({ success: false });
-        }
-
-        // 🔒 DUPLICATE CHECK
-        const existingApplication = await applicationsCollection.findOne({
-          transactionId: session.id,
-        });
-
-        if (existingApplication) {
-          return res.json({
-            success: true,
-            transactionId: session.id,
-            amount: existingApplication.amount,
-            alreadySaved: true,
-          });
-        }
-
-        // ✅ SAVE ONLY ONCE
-        const applicationData = {
-          scholarshipId: session.metadata.scholarshipId,
-          scholarshipName: session.metadata.scholarshipName,
-          applicantEmail: session.metadata.applicantEmail,
-          applicantName: session.metadata.applicantName,
-          amount: session.amount_total / 100,
-          transactionId: session.id,
-          paymentStatus: "paid",
-          appliedAt: new Date(),
-        };
-
-        const result = await applicationsCollection.insertOne(applicationData);
-
-        res.json({
-          success: true,
-          transactionId: session.id,
-          amount: applicationData.amount,
-          applicationId: result.insertedId,
-        });
-      } catch (error) {
-        console.error("Payment success error:", error);
-        res.status(500).json({ success: false });
-      }
-    });
 
     // >>>>>>>>>>>>>>>>>>>>> USERS-API <<<<<<<<<<<<<<<<<<<<<<<<<<<
     app.post("/users", async (req, res) => {
