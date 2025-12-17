@@ -242,91 +242,6 @@ async function run() {
       }
     });
 
-    // >>>> GET reviews for a specific user
-    // app.get("/reviews", async (req, res) => {
-    //   try {
-    //     const { userEmail, scholarshipId } = req.query;
-    //     let query = {};
-
-    //     if (userEmail) query.userEmail = userEmail;
-    //     if (scholarshipId) query.scholarshipId = new ObjectId(scholarshipId);
-
-    //     const reviews = await reviewCollection
-    //       .find(query)
-    //       .sort({ createdAt: -1 })
-    //       .toArray();
-
-    //     res.send(reviews);
-    //   } catch (error) {
-    //     console.error("Fetch reviews error:", error);
-    //     res
-    //       .status(500)
-    //       .send({ success: false, message: "Failed to fetch reviews" });
-    //   }
-    // });
-
-    // // >>>> UPDATE a review (edit)
-    // app.patch("/reviews/:id", async (req, res) => {
-    //   try {
-    //     const reviewId = req.params.id;
-    //     const { rating, comment } = req.body;
-
-    //     if (!rating) {
-    //       return res
-    //         .status(400)
-    //         .send({ success: false, message: "Rating required" });
-    //     }
-
-    //     const result = await reviewCollection.updateOne(
-    //       { _id: new ObjectId(reviewId) },
-    //       {
-    //         $set: {
-    //           rating: Number(rating),
-    //           comment: comment || "",
-    //           updatedAt: new Date(),
-    //         },
-    //       }
-    //     );
-
-    //     if (result.matchedCount === 0) {
-    //       return res
-    //         .status(404)
-    //         .send({ success: false, message: "Review not found" });
-    //     }
-
-    //     res.send({ success: true, message: "Review updated successfully" });
-    //   } catch (error) {
-    //     console.error("Update review error:", error);
-    //     res
-    //       .status(500)
-    //       .send({ success: false, message: "Failed to update review" });
-    //   }
-    // });
-
-    // // >>>> DELETE a review
-    // app.delete("/reviews/:id", async (req, res) => {
-    //   try {
-    //     const reviewId = req.params.id;
-
-    //     const result = await reviewCollection.deleteOne({
-    //       _id: new ObjectId(reviewId),
-    //     });
-
-    //     if (result.deletedCount === 0) {
-    //       return res
-    //         .status(404)
-    //         .send({ success: false, message: "Review not found" });
-    //     }
-
-    //     res.send({ success: true, message: "Review deleted successfully" });
-    //   } catch (error) {
-    //     console.error("Delete review error:", error);
-    //     res
-    //       .status(500)
-    //       .send({ success: false, message: "Failed to delete review" });
-    //   }
-    // });
-
     // >>>>>>>>>>> APPLICATIONS API <<<<<<<<<<
     //Get all applications by email
     app.get("/applications", async (req, res) => {
@@ -991,9 +906,9 @@ async function run() {
       }
     });
 
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
